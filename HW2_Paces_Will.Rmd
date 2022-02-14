@@ -1,0 +1,123 @@
+---
+title: "HW2_Paces_Will"
+author: "Will Paces"
+date: "February 13, 2022"
+output: html_document
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## STAA 566 Will Paces Homework 2
+
+I felt as though a dynamic plot would be a good vehicle for displaying Colorado's covid case data - the ability to see both the general trends across counties as well as selecting a specific county for greater detail helps to draw comparisons between regions. This data was sourced from the New York Times' github repository. 
+
+```{r cars}
+# Load libraries
+library(ggplot2)
+library(htmlwidgets)
+library(plotly)
+library(tidyr)
+library(dplyr)
+library(readr)
+
+# Download Covid Data ----
+cases_data <- read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv", 
+                       stringsAsFactors = F)
+
+# Subset Colorado data
+co.data <- cases_data[cases_data$state == 'Colorado', ]
+
+# Generate weekly averages
+co.rolling.cases <- co.data %>%
+  arrange(date) %>%
+  mutate(cases_1day  = cases  - lag(cases,1),
+         deaths_1day = deaths - lag(deaths,1),
+         cases_7day  = zoo::rollmean(cases_1day, 7, fill=NA, align="right"),
+         deaths_7day = zoo::rollmean(deaths_1day, 7, fill=NA, align="right"))
+
+# 15 largest CO counties (by population)
+largest.counties <- c('El Paso',
+                      'Denver',
+                      'Arapahoe',
+                      'Jefferson',
+                      'Adams',
+                      'Larimer',
+                      'Douglas',
+                      'Boulder',
+                      'Weld',
+                      'Pueblo',
+                      'Mesa',
+                      'Broomfield',
+                      'Garfield',
+                      'Eagle',
+                      'La Plata')
+
+co.rolling.cases <- co.rolling.cases[co.rolling.cases$county %in% largest.counties, ]
+co.rolling.cases$county <- factor(co.rolling.cases$county, levels = largest.counties)
+
+# Pivot to long-format data and separate cumulative from weekly average data
+all.co.long <- co.rolling.cases %>% 
+  select(date, county, cases, deaths) %>%
+  pivot_longer(c('cases', 'deaths')) %>%
+  drop_na()
+
+week.co.long <- co.rolling.cases %>%
+  select(date, county, cases_7day, deaths_7day) %>%
+  pivot_longer(c('cases_7day', 'deaths_7day')) %>%
+  drop_na()
+
+# Reformat names, ensure date is in correct format
+week.co.long[week.co.long$name == 'cases_7day', 3] <- 'cases'
+week.co.long[week.co.long$name == 'deaths_7day', 3] <- 'deaths'
+
+all.co.long$date <- as.Date(all.co.long$date)
+week.co.long$date <- as.Date(week.co.long$date)
+
+# Generate cumulative data figure with ggplot
+all.ggp <- ggplot(all.co.long) + 
+  geom_line(aes(x=date, y=value, color = county)) + 
+  theme_minimal(base_size = 12) +
+  ylab("Cumulative Count") +
+  scale_x_date(breaks = "1 year", 
+               minor_breaks = "1 month", 
+               date_labels = "%Y",
+               limits=c(as.Date("2020-01-01"), NA)) +
+  facet_wrap(~name, scales = "free_y")
+
+week.ggp <- ggplot(week.co.long) +
+  geom_line(aes(x=date, y=value, color = county)) +
+  theme_minimal(base_size = 12) +
+  ylab("Weekly Average Count") +
+  scale_x_date(breaks = "1 year", 
+               minor_breaks = "1 month", 
+               date_labels = "%Y",
+               limits=c(as.Date("2020-01-01"), NA)) +
+  facet_wrap(~name, scales = "free_y")
+
+
+# Convert to Plotly figures
+all.ptly <- ggplotly(all.ggp)
+week.ptly <- ggplotly(week.ggp)
+
+# Plot both figures with subplots
+covid.ptly <- subplot(list(all.ptly, week.ptly),
+                      nrows = 2,
+                      shareX = T,
+                      titleX = F) %>%
+  layout(xaxis = list(title = 'Cases'), xaxis2 = list(title = 'Deaths'),
+         yaxis = list(title = 'Cumulative Counts'), yaxis3 = list(title = 'Weekly Average Counts'))
+
+```
+
+## Colorado Covid Dashboard
+
+```{r pressure, echo=FALSE}
+covid.ptly
+```
