@@ -16,9 +16,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## STAA 566 Will Paces Homework 2
 
-I felt as though a dynamic plot would be a good vehicle for displaying Colorado's covid case data - the ability to see both the general trends across counties as well as selecting a specific county for greater detail helps to draw comparisons between regions. This data was sourced from the New York Times' github repository. 
+I felt as though a dynamic plot would be a good vehicle for displaying Colorado's covid case data - the ability to see both the general trends across counties as well as selecting a specific county for greater detail helps to draw comparisons between regions. This data was sourced from the New York Times' github repository. I restriced this investigation to the 15 largest (most populated) counties.
 
-```{r cars}
+```{r, warning=FALSE,message=FALSE}
 # Load libraries
 library(ggplot2)
 library(htmlwidgets)
@@ -26,7 +26,9 @@ library(plotly)
 library(tidyr)
 library(dplyr)
 library(readr)
+```
 
+```{r}
 # Download Covid Data ----
 cases_data <- read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv", 
                        stringsAsFactors = F)
@@ -37,8 +39,8 @@ co.data <- cases_data[cases_data$state == 'Colorado', ]
 # Generate weekly averages
 co.rolling.cases <- co.data %>%
   arrange(date) %>%
-  mutate(cases_1day  = cases  - lag(cases,1),
-         deaths_1day = deaths - lag(deaths,1),
+  mutate(cases_1day  = cases  - dplyr::lag(cases,1),
+         deaths_1day = deaths - dplyr::lag(deaths,1),
          cases_7day  = zoo::rollmean(cases_1day, 7, fill=NA, align="right"),
          deaths_7day = zoo::rollmean(deaths_1day, 7, fill=NA, align="right"))
 
@@ -65,59 +67,52 @@ co.rolling.cases$county <- factor(co.rolling.cases$county, levels = largest.coun
 # Pivot to long-format data and separate cumulative from weekly average data
 all.co.long <- co.rolling.cases %>% 
   select(date, county, cases, deaths) %>%
-  pivot_longer(c('cases', 'deaths')) %>%
+  pivot_longer(c('cases', 'deaths'), names_to = "type", values_to = 'Count') %>%
   drop_na()
+all.co.long$time <- rep('Cumulative', times = nrow(all.co.long))
 
 week.co.long <- co.rolling.cases %>%
   select(date, county, cases_7day, deaths_7day) %>%
-  pivot_longer(c('cases_7day', 'deaths_7day')) %>%
+  pivot_longer(c('cases_7day', 'deaths_7day'), names_to = "type", values_to = 'Count') %>%
   drop_na()
+week.co.long$type <- gsub("_7day", '', week.co.long$type)
+week.co.long$time <- rep('Weekly Average', times = nrow(week.co.long))
 
-# Reformat names, ensure date is in correct format
-week.co.long[week.co.long$name == 'cases_7day', 3] <- 'cases'
-week.co.long[week.co.long$name == 'deaths_7day', 3] <- 'deaths'
+day.co.long <- co.rolling.cases %>%
+  select(date, county, cases_1day, deaths_1day) %>%
+  pivot_longer(c('cases_1day', 'deaths_1day'), names_to = "type", values_to = 'Count') %>%
+  drop_na()
+day.co.long$type <- gsub("_1day", '', day.co.long$type)
+day.co.long$time <- rep('Daily Change', times = nrow(day.co.long))
 
-all.co.long$date <- as.Date(all.co.long$date)
-week.co.long$date <- as.Date(week.co.long$date)
+# Combine data
+co.long <- rbind(all.co.long, week.co.long, day.co.long)
 
-# Generate cumulative data figure with ggplot
-all.ggp <- ggplot(all.co.long) + 
-  geom_line(aes(x=date, y=value, color = county)) + 
+# Ensure date is in correct format and specify time factor order
+co.long$date <- as.Date(co.long$date)
+co.long$time <- factor(co.long$time, levels = c('Cumulative', 'Weekly Average', 'Daily Change'))
+co.long$type <- ifelse(co.long$type == 'cases', 'Cases', 'Deaths')
+
+# Generate figure with ggplot
+co.ggp <- ggplot(co.long, aes(x = date, y = Count)) + 
+  geom_line(aes(color = county)) +
   theme_minimal(base_size = 12) +
-  ylab("Cumulative Count") +
+  facet_grid(type ~ time, scales = 'free_y') +
   scale_x_date(breaks = "1 year", 
-               minor_breaks = "1 month", 
+               minor_breaks = "6 months", 
                date_labels = "%Y",
                limits=c(as.Date("2020-01-01"), NA)) +
-  facet_wrap(~name, scales = "free_y")
-
-week.ggp <- ggplot(week.co.long) +
-  geom_line(aes(x=date, y=value, color = county)) +
-  theme_minimal(base_size = 12) +
-  ylab("Weekly Average Count") +
-  scale_x_date(breaks = "1 year", 
-               minor_breaks = "1 month", 
-               date_labels = "%Y",
-               limits=c(as.Date("2020-01-01"), NA)) +
-  facet_wrap(~name, scales = "free_y")
+  scale_color_viridis_d() +
+  labs(color = 'County')
 
 
 # Convert to Plotly figures
-all.ptly <- ggplotly(all.ggp)
-week.ptly <- ggplotly(week.ggp)
-
-# Plot both figures with subplots
-covid.ptly <- subplot(list(all.ptly, week.ptly),
-                      nrows = 2,
-                      shareX = T,
-                      titleX = F) %>%
-  layout(xaxis = list(title = 'Cases'), xaxis2 = list(title = 'Deaths'),
-         yaxis = list(title = 'Cumulative Counts'), yaxis3 = list(title = 'Weekly Average Counts'))
-
+co.ptly <- ggplotly(co.ggp) %>%
+  layout(autosize = T)
 ```
 
 ## Colorado Covid Dashboard
 
-```{r pressure, echo=FALSE}
-covid.ptly
+```{r, echo=FALSE}
+co.ptly
 ```
